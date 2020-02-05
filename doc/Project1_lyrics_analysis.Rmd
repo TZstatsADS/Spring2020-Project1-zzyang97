@@ -1,0 +1,381 @@
+---
+title: 'Program1: Lyrics Analysis across Time  with R'
+output:
+  html_document:
+    csl: style.cls
+    df_print: paged
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = TRUE, warning = FALSE, results = "hide", error = FALSE, message = FALSE)
+```
+
+```{r load libraries, warning=FALSE, message=FALSE}
+library(tm)
+library(data.table)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(ggplot2)
+```
+
+```{r}
+load("/Users/zimu/Desktop/2nd Semester/Spring2020-Project1-zzyang97/output/processed_lyrics.RData")
+```
+### *Ziyang Zhang(zz2683)*
+### Looking for song genre trends across time
+
+When dealing with data, because there is only one song in 1960s, we decide to ignore its effect across time(i.e. Treat this song as an outlier.). According to the histogram, we can easily find that **Rock** is always the most popular genre across time because of the large area of pink. 
+
+```{r}
+summary(dt_lyrics)
+lyrics <- dt_lyrics %>%
+  mutate(decade = 
+           ifelse(dt_lyrics$year %in% 1972:1979, "1970s", 
+           ifelse(dt_lyrics$year %in% 1980:1989, "1980s", 
+           ifelse(dt_lyrics$year %in% 1990:1999, "1990s", 
+           ifelse(dt_lyrics$year %in% 2000:2009, "2000s", 
+           ifelse(dt_lyrics$year %in% 2010:2016, "2010s", 
+                  "NA"))))))
+
+lyrics_1 <-lyrics %>%
+  filter(decade != "NA") %>%
+  group_by(decade,genre)%>%
+  summarise(number_of_songs = n())
+
+g1 <- ggplot(lyrics_1) + 
+  geom_bar(aes(x = decade, y = number_of_songs, fill = genre), stat = "identity")  +
+  ggtitle("Released Songs") +
+  labs(x = NULL, y = "Song Count")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme_light()
+plot(g1)
+png('Released songs.png')
+plot(g1)
+dev.off()
+
+```
+
+### Length of songs by year
+
+Let's find the top 10 years with the most number of words
+
+```{r}
+ge_lyrics <- lyrics %>%
+  group_by(genre, year)%>%
+  summarise(number_of_songs = n())
+
+
+
+library(stringr)
+names(lyrics)
+###Count the words of songs
+lyrics$length<-str_count(lyrics$lyrics,"\\S+")
+length_df <- lyrics %>% 
+             group_by(year) %>% 
+             summarise(length = sum(length))
+
+Top10wordCount<-arrange(length_df,desc(length))%>%
+  slice(c(1:10))
+g2 <- ggplot(Top10wordCount,aes(x=reorder(year,length),y=length))+
+  geom_col(aes(fill=year))+coord_flip()+
+  ylab("Word count") + xlab ("") + 
+  ggtitle("Top 10 years in terms of word count") + 
+  theme_minimal()+
+  theme(legend.position = "none")
+plot(g2)
+png('Top_10_years_in_terms_of_word_count.png')
+plot(g2)
+dev.off()
+###Count words in different genre (use average)
+```
+
+Let's do a simple evaluation of the most frequently used word in the full set of lyrics from 1968 to 2016. 
+
+```{r}
+my_colors <- c("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#D55E00")
+lyrics_freq <- lyrics %>%
+  unnest_tokens(word, stemmedwords) %>%
+  count(word,sort = T) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot()+
+    geom_col(aes(word, n), fill = my_colors[4]) +
+    theme(legend.position = "none", 
+          plot.title = element_text(hjust = 0.5),
+          panel.grid.major = element_blank()) +
+    xlab("") + 
+    ylab("Song Count") +
+    ggtitle("Most Frequently Used Ten Words") +
+    coord_flip()+
+  theme_light()
+plot(lyrics_freq)
+png('lyrics_freq.png')
+plot(lyrics_freq)
+dev.off()
+
+```
+
+As in most popular music, *love* seems to be a common topic. 
+
+```{r}
+word_filtered <-  lyrics %>%
+  unnest_tokens(word, stemmedwords)
+words_counts <- word_filtered %>%
+  count(word, sort = TRUE) 
+head(words_counts)
+library(wordcloud2)
+my_wordcloud <- wordcloud2(words_counts[1:100, ], size =0.8 , shape = "star")
+my_wordcloud
+```
+![Here is the wordcloud](/Users/zimu/Desktop/2nd Semester/Spring2020-Project1-zzyang97/figs/my_wordcloud.png)
+
+###Popular Words in Different Genre.
+So far we've just viewed the top words among all songs from 1968 to 2016. What happened if we break them up by different genre? Are some words more prevalent in songs in *Rock* verse in *Metal*?
+
+```{r}
+popular_words <- word_filtered %>% 
+  group_by(genre) %>%
+  count(word, genre, sort = TRUE) %>%
+  slice(seq_len(8)) %>%
+  ungroup() %>%
+  arrange(genre,n) %>%
+  mutate(row = row_number()) 
+save(popular_words, file = "/Users/zimu/Desktop/2nd Semester/Spring2020-Project1-zzyang97/output/length_df.Rdata")
+rm(popular_words)
+load("/Users/zimu/Desktop/2nd Semester/Spring2020-Project1-zzyang97/output/length_df.Rdata")
+
+theme_lyrics <- function() 
+{
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_blank(), 
+        axis.ticks = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "none")
+}
+
+g7 <- popular_words %>%
+  ggplot(aes(row, n, fill = genre)) +
+    geom_col(show.legend = NULL) +
+    labs(x = NULL, y = "Song Count") +
+    ggtitle("Popular Words by Genre") + 
+    theme_lyrics() +  
+    facet_wrap(~genre, scales = "free") +
+    scale_x_continuous(  # This handles replacement of row 
+      breaks = popular_words$row, # notice need to reuse data frame
+      labels = popular_words$word) +
+    coord_flip()+
+  theme_light()
+plot(g7)
+png('Popular_word_genre.png')
+plot(g7)
+dev.off()
+```
+
+From the above, we could find that the top words across the genre levels(except Metal music) are very, very similar. Thus, it is difficult for us to determine what kind of the music based on lyrics. 
+
+###Timeless Word
+
+Some word in music are considered to be *timeless*. Timeless words perserver over time. They have passed, or have the power to pass, the test of time. They will still be enjoyed by a large number of audience. If we break down the timeline into decades, these word will roll to the top.
+
+```{r}
+timeless_words <- word_filtered %>% 
+  filter(decade != 'NA') %>%
+  group_by(decade) %>%
+  count(word, decade, sort = TRUE) %>%
+  slice(seq_len(8)) %>%
+  ungroup() %>%
+  arrange(decade,n) %>%
+  mutate(row = row_number()) 
+g8 <- timeless_words %>%
+  ggplot(aes(row, n, fill = decade)) +
+    geom_col(show.legend = NULL) +
+    labs(x = NULL, y = "Song Count") +
+    ggtitle("Timeless Words") + 
+    theme_lyrics() +  
+    facet_wrap(~decade, scales = "free", ncol = 5) +
+    scale_x_continuous(  # This handles replacement of row 
+      breaks = timeless_words$row, # notice need to reuse data frame
+      labels = timeless_words$word) +
+    coord_flip()+
+  theme_light()
+plot(g8)
+png('Timeless Words.png')
+plot(g8)
+dev.off()
+```
+
+Clearly **love**, **time**, **youre**, **baby** are timeless. 
+
+
+### Sentiment changes across time.
+
+There are three sentiment dictionaries. The AFINN lexicon measures sentiment with a numeric score betwen -5 and 5. But the other two lexicons could only categorize words in a binary way: positive or negative. The difference between NRC and Bing is NRC has eight categories while Bing only have 2. 
+
+We want to evaluate the sentiment in a numeric way. Thus we choose AFINN lecicon to score every word in lyrics. We want to see the change of emotions from 1968 to 2016. 
+
+```{r}
+library("lexicon", lib.loc="/Library/Frameworks/R.framework/Versions/3.5/Resources/library")
+afinn <- word_filtered %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(year) %>% 
+  summarise(sentiment = sum(value), number_of_songs = n()) %>%
+  mutate(method = "AFINN", avg_sentiment = sentiment/number_of_songs)
+g10 <- ggplot(afinn, aes(year, avg_sentiment)) +
+  geom_col(show.legend = FALSE, fill = my_colors[2]) +
+  xlim(1965,2020)+
+  geom_line()+
+  geom_point()+
+  ggtitle("Avg Sentiment across Time")+
+  xlab("Year")+
+    theme_light()
+plot(g10)
+png('Avg Senti_Time.png')
+plot(g10)
+dev.off()
+
+```
+
+It is a little wierd that in 1968, the average sentiment score is very negative. When we check what was happened in 1968, we find that there is only one song named $Without$ $You$ in 1968, which is a Rock music about broken love. Thus, it is not hard to understand why the emotion in 1968 is extremely negative. 
+
+In addtion, according to this figure, we could see that the average sentiment score is almostly positive before 1988, while the average score is always negative after 1988. Why does the emotion change from positive to negative so obviously? 
+
+```{r}
+afinn_genre<- word_filtered %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(genre) %>% 
+  summarise(sentiment = sum(value), number_of_songs = n()) %>%
+  mutate(method = "AFINN", avg_sentiment = sentiment/number_of_songs)
+g11 <- ggplot(afinn_genre, aes(genre, avg_sentiment))+
+  geom_col(show.legend = FALSE, fill = my_colors[3])+
+  ggtitle("Avg Sentiment by Genre")+
+  theme_light()+
+  theme(plot.margin=unit(rep(1,4),'lines'))
+plot(g11)
+png('Avg Sentiment by Genre.png')
+plot(g11)
+dev.off()
+
+```
+
+From the above figure, we could find that the metal, Hip-Hop, Rock and Other music have relatively negative emotions. 
+
+```{r}
+lyrics_year <- lyrics %>% group_by(year) %>% summarise(number_of_songs = n())
+```
+
+```{r}
+rock <- word_filtered %>% filter(genre == "Rock") 
+afinn_rock <- rock %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(year) %>% 
+  summarise(sentiment = sum(value), number_of_songs = n()) %>%
+  mutate(method = "AFINN", avg_sentiment = sentiment/number_of_songs)
+p1 <- ggplot(afinn_rock, aes(year, avg_sentiment))+
+  geom_col(show.legend = FALSE, fill = my_colors[1])+
+  ggtitle("Rock Music Avg Sentiment Score")+
+  geom_line()+
+  geom_point()+
+  theme_light()+
+  theme(plot.margin=unit(rep(1,4),'lines'))
+###Metal music emotion trends across time
+metal <- word_filtered %>% filter(genre == "Metal") 
+afinn_metal <- metal %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(year) %>% 
+  summarise(sentiment = sum(value), number_of_songs = n()) %>%
+  mutate(method = "AFINN", avg_sentiment = sentiment/number_of_songs)
+p2 <- ggplot(afinn_metal, aes(year, avg_sentiment))+
+  geom_col(show.legend = FALSE, fill = my_colors[2])+
+  ggtitle("Metal Music Avg Sentiment Score")+
+  geom_line()+
+  geom_point()+
+  theme_light()+
+  theme(plot.margin=unit(rep(1,4),'lines'))
+### Hip-hop  
+hiphop <- word_filtered %>% filter(genre == "Hip-Hop") 
+afinn_hiphop <- hiphop %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(year) %>% 
+  summarise(sentiment = sum(value), number_of_songs = n()) %>%
+  mutate(method = "AFINN", avg_sentiment = sentiment/number_of_songs)
+p3 <- ggplot(afinn_hiphop, aes(year, avg_sentiment))+
+  geom_col(show.legend = FALSE, fill = my_colors[3])+
+  ggtitle("Hip-Hop Music Avg Sentiment Score")+
+  geom_line()+
+  theme_light()+
+  theme(plot.margin=unit(rep(1,4),'lines'))
+### Other Music
+other <- word_filtered %>% filter(genre == "Other") 
+afinn_other <- other %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(year) %>% 
+  summarise(sentiment = sum(value), number_of_songs = n()) %>%
+  mutate(method = "AFINN", avg_sentiment = sentiment/number_of_songs)
+p4 <- ggplot(afinn_other, aes(year, avg_sentiment))+
+  geom_col(show.legend = FALSE, fill = my_colors[3])+
+  ggtitle("Other Music Avg Sentiment Score")+
+  geom_line()+
+  geom_point()+
+  theme_light()+
+  theme(plot.margin=unit(rep(1,4),'lines'))
+
+
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+ 
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+ 
+  numPlots = length(plots)
+ 
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+ 
+ if (numPlots==1) {
+    print(plots[[1]])
+ 
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+ 
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+ 
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+
+multiplot(p1, p2, p3, p4, cols=2)
+```
+
+From the above four plots, we can see that the Rock music emotion trend is quite similar to the whole music trend across time. The Metal music is always negative (expect in 1992) and it does not display the change from positive to negative after 1988. We could also ignore the Hip-Hop music and other music effect on the whole emotion change because of their relatively small numbers of songs. 
+
+
+
+
+
